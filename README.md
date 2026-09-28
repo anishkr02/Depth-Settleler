@@ -1,43 +1,95 @@
-# Debt-Settle API
+# Debt-Settle
+Group Expense Splitter with Minimum-Transaction Settlement & UPI Deep-Links
 
-FastAPI backend for the Debt-Settle group expense splitter. Wraps the
-tested settlement algorithm (greedy + exact backtracking with a hybrid
-dispatcher) in a real HTTP API backed by SQLite.
+## 1. Problem Statement
 
-## Run it
+When a group of people share expenses over time — a hostel mess, a trip, a shared flat — money doesn't flow cleanly. Different people pay for different things at different times: one person pays for lunch, another for travel, another fronts cash for a small errand that gets partially spent. By the end of a period (a trip, a month of mess bills), nobody actually remembers who owes what, and if everyone tries to settle up individually — "you owe me for lunch, I owe you for travel, he owes you for the room" — you end up with far more transactions than necessary, several of which cancel each other out.
 
-```
+The core problem Debt-Settle solves:
+
+> Given a group's shared expenses (who paid, how much, who it was for) and any informal person-to-person debts, calculate each member's net balance, and then determine the minimum number of payments needed to settle everyone up completely — with a one-tap UPI payment link generated for each payment.
+
+This is not just a bookkeeping tool. The interesting part — and the part worth building well — is the settlement algorithm: turning a tangled web of who-owes-whom into the smallest possible set of actual transactions.
+
+---
+
+## 2. Detailed Documentation References
+
+For in-depth architectural diagrams, design decisions, and test specifications, refer to:
+
+- 📄 **[claude_Debt-Settle-Architecture-Detailed.md](claude_Debt-Settle-Architecture-Detailed.md)**: Full technical system architecture, database ERD, identity model, 2-step confirmation lifecycle, cancel rules, group chat auto-lock, and frontend UI/UX breakdown.
+- 📄 **[Debt-Settle-Project-Spec.md](Debt-Settle-Project-Spec.md)**: Product specification, algorithm benchmarks, and test guarantees.
+
+---
+
+## 3. Core Features Built
+
+- **Hybrid Settlement Engine**:
+  - Automatically dispatches between an **Exact Backtracking Solver** (branch-and-bound DFS, guaranteed true minimum for $\le 12$ balances) and a **Greedy Heap Solver** ($O(n \log n)$ for $> 12$ balances).
+- **One-Tap UPI Deep Links**: Generates native `upi://pay?pa=...&pn=...&am=...&cu=INR&tn=Settlement` URLs for instant payment via Google Pay, PhonePe, Paytm, and BHIM.
+- **Identity & Dev Auth Bypass**: Server-derived identity with optional Firebase token verification and `DEV_MODE=true` header bypass (`X-Dev-Username`).
+- **Flexible Expense Splits**:
+  - Single-payer equal splits (`/expenses/equal`)
+  - Multi-payer expenses (multiple people contributing to one cost)
+  - Unequal splits: `exact` amounts, `percentage` (validates 100%), and `shares` (parts ratio) with penny-rounding drift correction.
+- **Two-Step Confirmation Flow**:
+  - Payer marks as paid $\rightarrow$ Status: `paid_pending_confirmation`.
+  - Only the recipient can confirm or deny receipt $\rightarrow$ Status: `confirmed`.
+  - Group is marked `fully_settled_at` once all transactions are confirmed.
+- **Permanent Group Freeze & Safe Cancellation**:
+  - Group is frozen from adding new expenses/debts as soon as a settlement plan is generated.
+  - Admin can cancel settlement **only** if all transactions are still pending.
+- **Group Chat with Auto-Lock**: REST-based shared group chat that automatically becomes read-only when the group is fully settled.
+- **7-Day Retention Cleanup**: Cascade-deletes groups and all associated records 7 days after full settlement.
+
+---
+
+## 4. Run It
+
+### Setup and Start API
+
+```bash
+# Install dependencies
 pip install -r requirements.txt
-cd app
+
+# Start the server
 uvicorn main:app --reload
 ```
 
-Then open http://127.0.0.1:8000/docs for interactive API docs (FastAPI
-generates this automatically — you can try every endpoint directly from
-the browser).
+Interactive API documentation (Swagger UI) is available at:
+👉 **http://127.0.0.1:8000/docs**
 
-## Structure
+### Run Test Suite
 
-- `models.py`, `balances.py`, `settlement_greedy.py`, `settlement_exact.py`,
-  `settle.py`, `upi.py` — the pure algorithm layer, framework-agnostic,
-  covered by `tests/test_settlement.py`
-- `db_models.py`, `db.py` — the SQLite storage layer
-- `main.py` — the route layer that connects the two
+```bash
+python -m pytest -v
+```
 
-## Endpoints
+---
 
-- `POST /groups`
-- `POST /groups/{id}/members`
-- `POST /groups/{id}/expenses/equal`
-- `GET  /groups/{id}/expenses`
-- `POST /groups/{id}/debts`
-- `GET  /groups/{id}/balances`
-- `GET  /groups/{id}/settle`
+## 5. API Endpoints Overview
 
-## Not yet built (next steps)
-
-- Multi-payer / unequal-split expense endpoint (algorithm layer already
-  supports this — see `models.py` — just needs a request schema + route)
-- Recurring expense templates / settlement periods
-- React frontend consuming this API (the mockup from earlier used mock
-  data; next step is pointing it at these real endpoints)
+| Method | Endpoint | Description | Auth / Role |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/auth/signup` | Register username and auto-claim pending email invites | Public |
+| `GET` | `/auth/me` | Current user profile and active group count | Authenticated |
+| `GET` | `/users/search` | Search users by username prefix | Authenticated |
+| `POST` | `/groups` | Create group (creator becomes admin) | Authenticated |
+| `GET` | `/groups` | List groups the user belongs to | Authenticated |
+| `GET` | `/groups/{id}` | Group details, members, and settlement status | Member |
+| `POST` | `/groups/{id}/invite` | Invite by `email`, `join_link`, or `username` | Member |
+| `POST` | `/groups/join/{join_token}` | Join group via shareable link | Authenticated |
+| `POST` | `/groups/{id}/expenses/equal` | Add single-payer equal split expense | Member |
+| `POST` | `/groups/{id}/expenses` | Add multi-payer & unequal split expense (`exact`, `percentage`, `shares`) | Member |
+| `GET` | `/groups/{id}/expenses` | List all group expenses | Member |
+| `POST` | `/groups/{id}/debts` | Record direct 1-to-1 IOU | Member |
+| `GET` | `/groups/{id}/balances` | Calculate live net balances | Member |
+| `POST` | `/groups/{id}/settle` | Generate optimized settlement plan + UPI links | Admin Only |
+| `GET` | `/groups/{id}/settlements` | View settlement transactions and UPI payment links | Member |
+| `POST` | `/settlements/{id}/mark-paid` | Payer marks transaction as paid | Payer Only |
+| `POST` | `/settlements/{id}/confirm` | Receiver confirms payment receipt | Receiver Only |
+| `POST` | `/settlements/{id}/deny` | Receiver denies payment receipt (resets to pending) | Receiver Only |
+| `POST` | `/groups/{id}/cancel-settlement` | Cancel settlement plan (only if all pending) | Admin Only |
+| `POST` | `/groups/{id}/chat` | Post a message to group chat (active groups only) | Member |
+| `GET` | `/groups/{id}/chat` | Get chat history and read-only status | Member |
+| `POST` | `/admin/retention/cleanup` | Trigger cleanup of groups settled $> 7$ days ago | System / Admin |
