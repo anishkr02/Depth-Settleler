@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from db import get_session
 from db_models import User, GroupMember, Group
 
-DEV_MODE = os.getenv("DEV_MODE", "true").lower() == "true"
+DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 
 # Firebase Admin SDK initialization if available and needed
@@ -15,7 +15,18 @@ if not DEV_MODE and FIREBASE_PROJECT_ID:
         import firebase_admin
         from firebase_admin import auth as fb_auth, credentials
         if not firebase_admin._apps:
-            firebase_admin.initialize_app()
+            cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+            if cred_path and os.path.exists(cred_path):
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
+            else:
+                raise FileNotFoundError(
+                    f"FIREBASE_SERVICE_ACCOUNT_PATH is not set or the file "
+                    f"doesn't exist (got: '{cred_path}'). Download the key "
+                    f"from Firebase Console > Project settings > Service "
+                    f"accounts > Generate new private key, then point "
+                    f"FIREBASE_SERVICE_ACCOUNT_PATH at it in .env"
+                )
         _firebase_initialized = True
     except Exception as e:
         print(f"Warning: Firebase Admin initialization failed: {e}")

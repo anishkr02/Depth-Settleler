@@ -1,4 +1,5 @@
 import os
+os.environ["DEV_MODE"] = "true"
 import pytest
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient

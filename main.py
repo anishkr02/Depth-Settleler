@@ -9,10 +9,12 @@ import secrets
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from sqlmodel import Session, select
+
+RETENTION_ADMIN_KEY = os.getenv("RETENTION_ADMIN_KEY", "")
 
 from db import init_db, get_session
 from db_models import (
@@ -887,8 +889,10 @@ def get_chat_history(
 @app.post("/admin/retention/cleanup")
 def trigger_retention_cleanup(
     days: int = 7,
+    x_admin_key: str = Header(default=""),
     session: Session = Depends(get_session)
 ):
-    """Runs the retention job to cascade-delete groups settled more than 'days' days ago."""
+    if not RETENTION_ADMIN_KEY or x_admin_key != RETENTION_ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Not authorized")
     deleted_ids = cleanup_expired_groups(session, retention_days=days)
     return {"status": "success", "deleted_group_ids": deleted_ids}
