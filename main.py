@@ -765,6 +765,9 @@ def deny_payment(
     if not to_member or to_member.user_id != current_user.id:
         raise HTTPException(403, "Only the designated receiver can deny this transaction")
 
+    if tx.status != "paid_pending_confirmation":
+        raise HTTPException(400, f"Cannot deny: transaction is currently '{tx.status}', not awaiting confirmation")
+
     tx.status = "pending"
     tx.paid_at = None
     session.add(tx)

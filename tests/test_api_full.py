@@ -308,6 +308,11 @@ def test_settlement_lifecycle_confirmation_and_freeze():
     assert confirm_res.status_code == 200
     assert confirm_res.json()["status"] == "confirmed"
 
+    # Verify that trying to deny an already-confirmed transaction fails with 400
+    deny_confirmed = client.post(f"/settlements/{tx2['id']}/deny", headers={"X-Dev-Username": "s_alice"})
+    assert deny_confirmed.status_code == 400
+    assert "not awaiting confirmation" in deny_confirmed.json()["detail"].lower()
+
     # Verify group is stamped as fully_settled_at
     g_final = client.get(f"/groups/{g_id}", headers={"X-Dev-Username": "s_alice"}).json()
     assert g_final["fully_settled_at"] is not None
